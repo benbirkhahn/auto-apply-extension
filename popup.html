@@ -41,6 +41,7 @@
       font-weight: 700;
       background: linear-gradient(135deg, #667eea, #a78bfa);
       -webkit-background-clip: text;
+      background-clip: text;
       -webkit-text-fill-color: transparent;
     }
 
@@ -308,6 +309,60 @@
       to { transform: translateY(0); opacity: 1; }
     }
 
+    .scan-results {
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px dashed #2a2a4a;
+      max-height: 250px;
+      overflow-y: auto;
+    }
+    .job-card {
+      background: #1a1a2e;
+      border: 1px solid #2a2a4a;
+      border-radius: 8px;
+      padding: 10px;
+    }
+    .job-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 4px;
+    }
+    .job-card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #e0e0e0;
+      margin-right: 8px;
+    }
+    .job-card-company {
+      font-size: 11px;
+      color: #888;
+    }
+    .job-card-score {
+      font-size: 12px;
+      font-weight: bold;
+      padding: 2px 6px;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+    .score-high { background: #1e3a1e; color: #4ade80; border: 1px solid #2a5a2a; }
+    .score-med { background: #3a3a1e; color: #fbbf24; border: 1px solid #5a5a2a; }
+    .score-low { background: #3a1e1e; color: #f87171; border: 1px solid #5a2a2a; }
+    .job-card-reason {
+      font-size: 11px;
+      color: #ccc;
+      margin-top: 6px;
+      line-height: 1.4;
+    }
+    .job-card-link {
+      display: inline-block;
+      margin-top: 6px;
+      font-size: 11px;
+      color: #667eea;
+      text-decoration: none;
+    }
+    .job-card-link:hover { text-decoration: underline; }
+
     #fill-btn { margin-bottom: 0; }
   </style>
 </head>
@@ -346,6 +401,15 @@
     <button class="btn btn-primary" id="fill-btn" disabled>
       <span id="fill-btn-text">Fill Application</span>
     </button>
+    <button class="btn btn-primary" id="scan-jobs-btn" style="display:none; margin-top: 10px; background: linear-gradient(135deg, #10b981, #059669);">
+      <span id="scan-jobs-btn-text">Scan Page for Jobs</span>
+    </button>
+
+    <div id="scan-results" class="scan-results" style="display:none;">
+      <h3 style="font-size: 13px; margin-bottom: 8px; color: #a78bfa;">Job Fit Results</h3>
+      <div id="jobs-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+    </div>
+
     <button class="btn btn-secondary" id="options-btn">Edit Profile</button>
     <a class="btn btn-outline" id="report-btn">Report an issue with this page</a>
   </div>

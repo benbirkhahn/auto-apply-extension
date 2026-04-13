@@ -3,6 +3,10 @@
 (function () {
   'use strict';
 
+  // Guard against being injected more than once (e.g. via scripting.executeScript fallback)
+  if (window.__autoApplyLoaded) return;
+  window.__autoApplyLoaded = true;
+
   // ─── Field Mapping ────────────────────────────────────────────────────────
   // Maps profile keys to common form field name/id/label patterns
 
@@ -78,6 +82,34 @@
     coverLetter: {
       patterns: ['cover.?letter', 'covering.?letter', 'motivation.?letter'],
       value: (p, aiContent) => aiContent?.coverLetter || p.defaultCoverLetter || ''
+    },
+    whyCompany: {
+      patterns: [
+        'why.+company', 'why.+us', 'why.+our', 'why.+join', 'why.+interested',
+        'why.+want.+work', 'why.+apply', 'why.+this.+role', 'why.+position',
+        'what.+interest.+you', 'what.+attract', 'motivation', 'what.+excit',
+        '^why\\s+\\w+', 'why\\s+\\w+\\?'
+      ],
+      value: (p, aiContent) => aiContent?.whyCompany || ''
+    },
+    whyRole: {
+      patterns: [
+        'why.+role', 'why.+position', 'why.+job', 'what.+role',
+        'fit.+role', 'suited.+role', 'qualify', 'why.+good.+fit'
+      ],
+      value: (p, aiContent) => aiContent?.whyRole || ''
+    },
+    greatestStrength: {
+      patterns: ['strength', 'greatest.?strength', 'best.?quality', 'superpower'],
+      value: (p, aiContent) => aiContent?.greatestStrength || ''
+    },
+    growthArea: {
+      patterns: ['weakness', 'growth.?area', 'improve', 'development.?area', 'challenge.+yourself'],
+      value: (p, aiContent) => aiContent?.growthArea || ''
+    },
+    contribution: {
+      patterns: ['contribute', 'bring.+team', 'add.+value', 'offer.+company', 'unique.+value'],
+      value: (p, aiContent) => aiContent?.contribution || ''
     }
   };
 
@@ -119,7 +151,14 @@
 
     if (message.type === 'DETECT_FORM') {
       const detected = detectFormOnPage();
-      sendResponse({ detected, url: window.location.href });
+      const jobInfo = detected ? extractJobInfo() : null;
+      sendResponse({ detected, url: window.location.href, jobInfo });
+      return true;
+    }
+
+    if (message.type === 'SCAN_JOBS') {
+      const jobs = extractJobCards();
+      sendResponse({ success: true, jobs });
       return true;
     }
   });
@@ -131,9 +170,122 @@
     return inputs.length > 2;
   }
 
+  function extractJobCards() {
+    const jobs = [];
+    
+    // LinkedIn
+    if (window.location.hostname.includes('linkedin.com')) {
+      const cards = document.querySelectorAll('li.jobs-search-results__list-item, .job-card-container');
+      cards.forEach(card => {
+        const titleEl = card.querySelector('.job-card-list__title, .artdeco-entity-lockup__title');
+        const companyEl = card.querySelector('.job-card-container__company-name, .artdeco-entity-lockup__subtitle');
+        const linkEl = card.querySelector('a.job-card-container__link, a.job-card-list__title, a.job-card-container__company-name');
+        
+        if (titleEl && companyEl) {
+          jobs.push({
+            title: titleEl.textContent.trim(),
+            company: companyEl.textContent.trim(),
+            link: linkEl ? linkEl.href : window.location.href,
+            description: '' // Descriptions are generally separate or fetched via ajax, keep empty for now
+          });
+        }
+      });
+    } 
+    // Indeed
+    else if (window.location.hostname.includes('indeed.com')) {
+      const cards = document.querySelectorAll('.job_seen_beacon, .slider_item');
+      cards.forEach(card => {
+        const titleEl = card.querySelector('h2.jobTitle, .jcs-JobTitle');
+        const companyEl = card.querySelector('.companyName, [data-testid="company-name"]');
+        const linkEl = card.querySelector('a.jcs-JobTitle');
+        const descEl = card.querySelector('.job-snippet');
+        
+        if (titleEl && companyEl) {
+          jobs.push({
+            title: titleEl.textContent.trim(),
+            company: companyEl.textContent.trim(),
+            link: linkEl ? linkEl.href : window.location.href,
+            description: descEl ? descEl.textContent.trim() : ''
+          });
+        }
+      });
+    }
+
+    // Deduplicate
+    const seen = new Set();
+    const uniqueJobs = [];
+    for (const job of jobs) {
+      const key = `${job.title}|${job.company}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueJobs.push(job);
+      }
+    }
+
+    return uniqueJobs.slice(0, 15);
+  }
+
   function getSiteKey() {
     const host = window.location.hostname.replace('www.', '');
     return Object.keys(SITE_SELECTORS).find(k => host.includes(k));
+  }
+
+  function extractJobInfo() {
+    // ── Indeed Smart Apply specific selectors ──
+    const jobTitle = (
+      document.querySelector('[data-testid="job-title"], .jobsearch-JobInfoHeader-title, h1.jobTitle, h1')
+    )?.textContent?.trim() || '';
+
+    const company = (
+      document.querySelector('[data-testid="inlineHeader-companyName"], [data-company-name], .jobsearch-InlineCompanyRating-companyHeader, [class*="companyName"], [class*="company-name"]')
+    )?.textContent?.trim() ||
+    // Indeed SmartApply: company often in the top card
+    document.querySelector('.ia-BasePage-header [data-testid*="company"], .css-87uc0g, .jobsearch-CompanyAvatar-companyName')?.textContent?.trim() ||
+    // Indeed SmartApply top header e.g. "Valon Tech - New York"
+    document.querySelector('[class*="JobHeader"] [class*="company"], [class*="jobHeader"] [class*="company"]')?.textContent?.trim() ||
+    // Pull from page title: "AI Enablement Engineer - Valon Tech - New York" → "Valon Tech"
+    (() => {
+      const parts = document.title.split(' - ').map(s => s.trim()).filter(Boolean);
+      // Company is usually the second segment (after job title, before location)
+      return parts.length >= 2 ? parts[1] : '';
+    })() || '';
+
+    // ── Job description selectors ──
+    const descriptionSelectors = [
+      '[data-testid="job-description"]',
+      '#job-description',
+      '.jobsearch-jobDescriptionText',
+      '.job-description',
+      '[class*="jobDescription"]',
+      'section.description',
+      '.description__text',
+      '[data-automation-id="job-description"]'
+    ];
+
+    let description = '';
+    for (const sel of descriptionSelectors) {
+      const el = document.querySelector(sel);
+      if (el && el.innerText.length > 100) {
+        description = el.innerText;
+        break;
+      }
+    }
+
+    // Indeed SmartApply: description is in a right-side panel or separate div
+    if (!description) {
+      // Look for the largest text block on the page
+      const candidates = Array.from(document.querySelectorAll('div, section, article'));
+      let best = '';
+      for (const el of candidates) {
+        const text = el.innerText?.trim() || '';
+        if (text.length > best.length && text.length < 10000 && el.children.length < 50) {
+          best = text;
+        }
+      }
+      description = best.substring(0, 3000);
+    }
+
+    return { jobTitle, company, description };
   }
 
   // ─── Fill Logic ───────────────────────────────────────────────────────────
@@ -232,14 +384,23 @@
       const labelEl = document.getElementById(labelledBy);
       if (labelEl) return labelEl.textContent.trim();
     }
-    // Try preceding sibling/parent text
-    const parent = el.parentElement;
-    if (parent) {
-      const text = Array.from(parent.childNodes)
-        .filter(n => n.nodeType === Node.TEXT_NODE)
-        .map(n => n.textContent.trim())
-        .join(' ');
-      if (text) return text;
+    // Walk up DOM up to 6 levels looking for a label or heading nearby
+    let node = el.parentElement;
+    for (let i = 0; i < 6; i++) {
+      if (!node) break;
+      // Look for a label element inside this ancestor
+      const label = node.querySelector('label, legend, h1, h2, h3, h4, [class*="label"], [class*="question"], [class*="title"]');
+      if (label && label !== el) {
+        const text = label.textContent.trim();
+        if (text.length > 0 && text.length < 200) return text;
+      }
+      // Also check preceding siblings for text
+      const prev = node.previousElementSibling;
+      if (prev) {
+        const text = prev.textContent.trim();
+        if (text.length > 0 && text.length < 200) return text;
+      }
+      node = node.parentElement;
     }
     return '';
   }
@@ -255,10 +416,9 @@
     await sleep(50);
 
     // Use native input setter to bypass React's synthetic events
-    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype, 'value'
-    )?.set || Object.getOwnPropertyDescriptor(
-      window.HTMLTextAreaElement.prototype, 'value'
+    const nativeInputValueSetter = (input.tagName === 'TEXTAREA'
+      ? Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')
+      : Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')
     )?.set;
 
     if (nativeInputValueSetter) {

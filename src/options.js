@@ -5,6 +5,7 @@
 let workHistory = [];
 let education = [];
 let skills = [];
+let projects = [];
 
 // ─── Init ─────────────────────────────────────────────────────────────────
 
@@ -13,6 +14,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadAllData();
   setupListeners();
   renderWorkList();
+  renderProjectsList();
   renderEduList();
   renderSkills();
   await loadHistory();
@@ -54,22 +56,37 @@ async function loadAllData() {
   workHistory = profile.workHistory || [];
   education = profile.education || [];
   skills = profile.skills || [];
+  projects = profile.projects || [];
 
   // Load AI settings
   const { aiSettings } = await chrome.storage.local.get('aiSettings');
   if (aiSettings) {
     const tone = document.getElementById('aiTone');
     const length = document.getElementById('coverLetterLength');
+    const provider = document.getElementById('aiProvider');
     if (tone) tone.value = aiSettings.tone || 'professional';
     if (length) length.value = aiSettings.coverLetterLength || 'medium';
+    if (provider) {
+      provider.value = aiSettings.provider || 'claude';
+      updateProviderUI(provider.value);
+    }
   }
 
-  // Load API key indicator
-  const { apiKey } = await chrome.storage.local.get('apiKey');
-  if (apiKey) {
-    document.getElementById('apiKey').value = apiKey;
+  // Load API keys
+  const keys = await chrome.storage.local.get(['apiKeyClaude', 'apiKeyOpenAI', 'apiKeyGemini', 'apiKey']);
+  if (keys.apiKeyClaude) document.getElementById('apiKeyClaude').value = keys.apiKeyClaude;
+  if (keys.apiKeyOpenAI) document.getElementById('apiKeyOpenAI').value = keys.apiKeyOpenAI;
+  if (keys.apiKeyGemini) document.getElementById('apiKeyGemini').value = keys.apiKeyGemini;
+  
+  // Migration/Fallback for old 'apiKey' (Claude)
+  if (keys.apiKey && !keys.apiKeyClaude) {
+    document.getElementById('apiKeyClaude').value = keys.apiKey;
+    await chrome.storage.local.set({ apiKeyClaude: keys.apiKey });
+  }
+
+  if (keys.apiKeyClaude || keys.apiKeyOpenAI || keys.apiKeyGemini) {
     document.getElementById('key-status').innerHTML =
-      '<span style="color:#4ade80;">✓ API key saved</span>';
+      '<span style="color:#4ade80;">✓ API settings saved</span>';
   }
 }
 
@@ -78,6 +95,7 @@ async function loadAllData() {
 function setupListeners() {
   document.getElementById('save-personal').addEventListener('click', savePersonal);
   document.getElementById('save-work').addEventListener('click', saveWork);
+  document.getElementById('save-projects').addEventListener('click', saveProjects);
   document.getElementById('save-edu').addEventListener('click', saveEdu);
   document.getElementById('save-skills').addEventListener('click', saveSkills);
   document.getElementById('save-ai').addEventListener('click', saveAI);
@@ -86,6 +104,11 @@ function setupListeners() {
   document.getElementById('add-work').addEventListener('click', () => {
     workHistory.push({ title: '', company: '', startDate: '', endDate: '', description: '' });
     renderWorkList();
+  });
+
+  document.getElementById('add-project').addEventListener('click', () => {
+    projects.push({ name: '', url: '', description: '', technologies: '' });
+    renderProjectsList();
   });
 
   document.getElementById('add-edu').addEventListener('click', () => {
@@ -98,17 +121,23 @@ function setupListeners() {
     if (e.key === 'Enter') addSkill();
   });
 
-  // Toggle API key visibility
-  document.getElementById('toggle-key').addEventListener('click', () => {
-    const input = document.getElementById('apiKey');
-    const btn = document.getElementById('toggle-key');
-    if (input.type === 'password') {
-      input.type = 'text';
-      btn.textContent = 'Hide';
-    } else {
-      input.type = 'password';
-      btn.textContent = 'Show';
-    }
+  document.getElementById('aiProvider').addEventListener('change', (e) => {
+    updateProviderUI(e.target.value);
+  });
+
+  // Toggle API key visibility (multiple)
+  document.querySelectorAll('.toggle-key').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const targetId = btn.dataset.target;
+      const input = document.getElementById(targetId);
+      if (input.type === 'password') {
+        input.type = 'text';
+        btn.textContent = 'Hide';
+      } else {
+        input.type = 'password';
+        btn.textContent = 'Show';
+      }
+    });
   });
 
   // Resume upload
@@ -149,6 +178,7 @@ async function savePersonal() {
 
   profile.workAuthorized = document.getElementById('workAuthorized').checked;
   profile.workHistory = workHistory;
+  profile.projects = projects;
   profile.education = education;
   profile.skills = skills;
 
@@ -212,6 +242,61 @@ function renderWorkList() {
       collectWorkFromDOM();
       workHistory.splice(i, 1);
       renderWorkList();
+    });
+    list.appendChild(div);
+  });
+}
+
+// ─── Save Projects ────────────────────────────────────────────────────────
+
+async function saveProjects() {
+  collectProjectsFromDOM();
+  const { profile: existing = {} } = await chrome.storage.local.get('profile');
+  await chrome.storage.local.set({ profile: { ...existing, projects } });
+  showSaveStatus('save-projects-status');
+  showToast('Projects saved!');
+}
+
+function collectProjectsFromDOM() {
+  const items = document.querySelectorAll('#projects-list .list-item');
+  projects = Array.from(items).map(item => ({
+    name: item.querySelector('[data-field="name"]')?.value || '',
+    url: item.querySelector('[data-field="url"]')?.value || '',
+    technologies: item.querySelector('[data-field="technologies"]')?.value || '',
+    description: item.querySelector('[data-field="description"]')?.value || ''
+  }));
+}
+
+function renderProjectsList() {
+  const list = document.getElementById('projects-list');
+  list.innerHTML = '';
+  projects.forEach((proj, i) => {
+    const div = document.createElement('div');
+    div.className = 'list-item';
+    div.innerHTML = `
+      <button class="remove-btn" data-idx="${i}" title="Remove">✕</button>
+      <div class="form-grid" style="margin-bottom:10px;">
+        <div class="field">
+          <label>Project Name</label>
+          <input type="text" data-field="name" value="${esc(proj.name)}" placeholder="My Awesome Project" />
+        </div>
+        <div class="field">
+          <label>URL / Link (optional)</label>
+          <input type="url" data-field="url" value="${esc(proj.url || '')}" placeholder="https://github.com/you/project" />
+        </div>
+        <div class="field span-2">
+          <label>Technologies Used</label>
+          <input type="text" data-field="technologies" value="${esc(proj.technologies || '')}" placeholder="React, Node.js, PostgreSQL..." />
+        </div>
+      </div>
+      <div class="field">
+        <label>Description / What You Built</label>
+        <textarea data-field="description" rows="3" placeholder="What the project does, your role, and key outcomes...">${esc(proj.description)}</textarea>
+      </div>`;
+    div.querySelector('.remove-btn').addEventListener('click', () => {
+      collectProjectsFromDOM();
+      projects.splice(i, 1);
+      renderProjectsList();
     });
     list.appendChild(div);
   });
@@ -316,23 +401,55 @@ function renderSkills() {
 // ─── AI Settings ──────────────────────────────────────────────────────────
 
 async function saveAI() {
+  const { aiSettings: existing = {} } = await chrome.storage.local.get('aiSettings');
   const aiSettings = {
+    ...existing,
     tone: document.getElementById('aiTone').value,
-    coverLetterLength: document.getElementById('coverLetterLength').value
+    coverLetterLength: document.getElementById('coverLetterLength').value,
+    provider: document.getElementById('aiProvider').value
   };
   await chrome.storage.local.set({ aiSettings });
   showSaveStatus('save-ai-status');
-  showToast('AI settings saved!');
+  showToast('AI preferences saved!');
 }
 
 async function saveAPIKey() {
-  const key = document.getElementById('apiKey').value.trim();
-  if (!key) { showToast('Please enter an API key', 'error'); return; }
-  if (!key.startsWith('sk-ant')) { showToast('That doesn\'t look like a valid Claude API key', 'error'); return; }
+  const provider = document.getElementById('aiProvider').value;
+  const keyClaude = document.getElementById('apiKeyClaude').value.trim();
+  const keyOpenAI = document.getElementById('apiKeyOpenAI').value.trim();
+  const keyGemini = document.getElementById('apiKeyGemini').value.trim();
 
-  await chrome.storage.local.set({ apiKey: key });
-  document.getElementById('key-status').innerHTML = '<span style="color:#4ade80;">✓ API key saved</span>';
-  showToast('API key saved!');
+  // Basic validation for active provider
+  if (provider === 'claude' && keyClaude && !keyClaude.startsWith('sk-ant')) {
+    showToast('That doesn\'t look like a valid Claude API key', 'error');
+    return;
+  }
+  if (provider === 'openai' && keyOpenAI && !keyOpenAI.startsWith('sk-')) {
+    showToast('That doesn\'t look like a valid OpenAI API key', 'error');
+    return;
+  }
+
+  await chrome.storage.local.set({
+    apiKeyClaude: keyClaude,
+    apiKeyOpenAI: keyOpenAI,
+    apiKeyGemini: keyGemini,
+    // Keep legacy key synced if claude is used
+    apiKey: keyClaude
+  });
+
+  // Also save the provider in aiSettings
+  const { aiSettings = {} } = await chrome.storage.local.get('aiSettings');
+  aiSettings.provider = provider;
+  await chrome.storage.local.set({ aiSettings });
+
+  document.getElementById('key-status').innerHTML = '<span style="color:#4ade80;">✓ Settings saved</span>';
+  showToast('AI settings saved!');
+}
+
+function updateProviderUI(provider) {
+  document.querySelectorAll('.provider-config').forEach(el => el.style.display = 'none');
+  const activeConfig = document.getElementById(`${provider}-config`);
+  if (activeConfig) activeConfig.style.display = 'block';
 }
 
 // ─── History ──────────────────────────────────────────────────────────────
@@ -366,54 +483,125 @@ async function handleResumeUpload(file) {
   if (!file) return;
   const resultDiv = document.getElementById('parse-result');
   resultDiv.style.display = 'block';
-  resultDiv.innerHTML = '<p style="color:#888; font-size:14px;">⏳ Parsing resume...</p>';
+  resultDiv.innerHTML = `
+    <div style="background:#1a1a2e; border:1px solid #2a2a4a; border-radius:8px; padding:16px; text-align:center;">
+      <div style="font-size:24px; margin-bottom:8px;">⏳</div>
+      <p style="color:#888; font-size:14px;">Reading your resume...</p>
+    </div>`;
 
   try {
     const parsed = await window.parseResumePDF(file);
     if (!parsed) throw new Error('Could not parse PDF');
 
-    // Merge into profile
+    // Track what was found for the summary
+    const found = [];
+    const skipped = [];
+
+    // Merge into profile — always overwrite with parsed data (resume is source of truth)
     const { profile: existing = {} } = await chrome.storage.local.get('profile');
     const merged = { ...existing };
 
-    if (parsed.firstName && !merged.firstName) merged.firstName = parsed.firstName;
-    if (parsed.lastName && !merged.lastName) merged.lastName = parsed.lastName;
-    if (parsed.email && !merged.email) merged.email = parsed.email;
-    if (parsed.phone && !merged.phone) merged.phone = parsed.phone;
-    if (parsed.linkedin && !merged.linkedin) merged.linkedin = parsed.linkedin;
-    if (parsed.github && !merged.github) merged.github = parsed.github;
-    if (parsed.summary && !merged.summary) merged.summary = parsed.summary;
+    const textFields = [
+      ['firstName', 'First name'],
+      ['lastName', 'Last name'],
+      ['email', 'Email'],
+      ['phone', 'Phone'],
+      ['linkedin', 'LinkedIn'],
+      ['github', 'GitHub'],
+      ['portfolio', 'Portfolio'],
+      ['summary', 'Summary']
+    ];
+
+    for (const [key, label] of textFields) {
+      if (parsed[key]) {
+        merged[key] = parsed[key];
+        found.push(label);
+      }
+    }
+
     if (parsed.skills?.length) {
       skills = [...new Set([...(merged.skills || []), ...parsed.skills])];
       merged.skills = skills;
+      found.push(`${parsed.skills.length} skills`);
       renderSkills();
     }
+
     if (parsed.workHistory?.length) {
-      workHistory = [...(merged.workHistory || []), ...parsed.workHistory];
+      // Overwrite work history with parsed version (avoid duplicates)
+      workHistory = parsed.workHistory;
       merged.workHistory = workHistory;
+      found.push(`${parsed.workHistory.length} job${parsed.workHistory.length !== 1 ? 's' : ''}`);
       renderWorkList();
     }
+
     if (parsed.education?.length) {
-      education = [...(merged.education || []), ...parsed.education];
+      education = parsed.education;
       merged.education = education;
+      found.push(`${parsed.education.length} school${parsed.education.length !== 1 ? 's' : ''}`);
       renderEduList();
     }
 
-    await chrome.storage.local.set({ profile: merged });
-    await loadAllData();
+    if (parsed.projects?.length) {
+      projects = parsed.projects;
+      merged.projects = projects;
+      found.push(`${parsed.projects.length} project${parsed.projects.length !== 1 ? 's' : ''}`);
+      renderProjectsList();
+    }
 
+    await chrome.storage.local.set({ profile: merged });
+
+    // Populate all DOM fields immediately so user sees results without reloading
+    const domFields = ['firstName', 'lastName', 'email', 'phone', 'linkedin', 'github', 'portfolio', 'summary'];
+    for (const f of domFields) {
+      const el = document.getElementById(f);
+      if (el && merged[f]) el.value = merged[f];
+    }
+
+    // Show success result
     resultDiv.innerHTML = `
-      <div style="background:#1a2a1a; border:1px solid #2a4a2a; border-radius:8px; padding:14px;">
-        <p style="color:#4ade80; font-size:14px; margin-bottom:8px;">✓ Resume parsed successfully!</p>
-        <p style="color:#888; font-size:12px;">
-          Found: ${parsed.workHistory?.length || 0} jobs, ${parsed.education?.length || 0} schools,
-          ${parsed.skills?.length || 0} skills. Profile updated — review and save each section.
+      <div style="background:#1a2a1a; border:1px solid #2a4a2a; border-radius:8px; padding:16px;">
+        <p style="color:#4ade80; font-size:15px; font-weight:600; margin-bottom:10px;">✓ Resume imported successfully!</p>
+        <p style="color:#aaa; font-size:13px; margin-bottom:12px;">Found and filled: <strong style="color:#e0e0e0;">${found.join(', ')}</strong></p>
+        <p style="color:#888; font-size:12px; margin-bottom:14px;">Review each section below, make any edits, then click Save.</p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button data-goto="personal" style="background:#1a2a3a; border:1px solid #2a4a6a; color:#60a5fa; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer;">👤 Review Personal Info</button>
+          <button data-goto="work" style="background:#1a2a3a; border:1px solid #2a4a6a; color:#60a5fa; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer;">💼 Review Work History</button>
+          <button data-goto="projects" style="background:#1a2a3a; border:1px solid #2a4a6a; color:#60a5fa; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer;">🚀 Review Projects</button>
+          <button data-goto="education" style="background:#1a2a3a; border:1px solid #2a4a6a; color:#60a5fa; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer;">🎓 Review Education</button>
+          <button data-goto="skills" style="background:#1a2a3a; border:1px solid #2a4a6a; color:#60a5fa; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer;">⚡ Review Skills</button>
+        </div>
+      </div>`;
+
+    // Attach listeners after injecting HTML (inline onclick blocked by CSP)
+    resultDiv.querySelectorAll('[data-goto]').forEach(btn => {
+      btn.addEventListener('click', () => switchToSection(btn.dataset.goto));
+    });
+
+    showToast(`Resume imported! Found ${found.join(', ')}.`);
+
+  } catch (err) {
+    console.error('Resume parse error:', err);
+    resultDiv.innerHTML = `
+      <div style="background:#2a1a1a; border:1px solid #4a2a2a; border-radius:8px; padding:16px;">
+        <p style="color:#f87171; font-size:14px; font-weight:600; margin-bottom:6px;">✗ Could not read resume</p>
+        <p style="color:#888; font-size:13px;">${esc(err.message)}</p>
+        <p style="color:#666; font-size:12px; margin-top:8px;">
+          Make sure the PDF contains selectable text (not a scanned image).
+          Try opening the PDF and checking if you can highlight text.
         </p>
       </div>`;
-  } catch (err) {
-    resultDiv.innerHTML = `<p style="color:#f87171; font-size:14px;">✗ Error: ${esc(err.message)}</p>`;
   }
 }
+
+// Exposed globally for inline onclick buttons in the result card
+window.switchToSection = function(sectionName) {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  const navItem = document.querySelector(`.nav-item[data-section="${sectionName}"]`);
+  if (navItem) navItem.classList.add('active');
+  const section = document.getElementById('section-' + sectionName);
+  if (section) section.classList.add('active');
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 

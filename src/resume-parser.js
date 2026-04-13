@@ -1,251 +1,426 @@
-// resume-parser.js — extracts profile data from a PDF resume using regex heuristics
-// Uses PDF.js (loaded from CDN or bundled). Falls back to text extraction if PDF.js unavailable.
+// resume-parser.js — PDF resume extraction via Claude API (most reliable approach)
+// Falls back to pure-JS text extraction for basic fields if no API key is set.
 
 'use strict';
 
 /**
- * Main entry point — parses a PDF File object and returns a structured profile object.
+ * Main entry point — parses a PDF File and returns a structured profile object.
  * @param {File} file
  * @returns {Promise<Object>}
  */
 window.parseResumePDF = async function (file) {
-  const text = await extractTextFromPDF(file);
-  if (!text) throw new Error('Could not extract text from PDF. Make sure the PDF is not image-only.');
-  return parseResumeText(text);
+  const keys = await chrome.storage.local.get(['apiKeyClaude', 'apiKeyOpenAI', 'apiKeyGemini', 'apiKey', 'aiSettings']);
+  const provider = keys.aiSettings?.provider || 'claude';
+
+  // Route to the correct API based on the active provider setting
+  if (provider === 'gemini' && keys.apiKeyGemini) {
+    return parseWithGemini(file, keys.apiKeyGemini);
+  }
+  if (provider === 'openai' && keys.apiKeyOpenAI) {
+    return parseWithOpenAI(file, keys.apiKeyOpenAI);
+  }
+  // Claude (default) — support both new key name and legacy fallback
+  const claudeKey = keys.apiKeyClaude || keys.apiKey;
+  if (claudeKey) {
+    return parseWithClaude(file, claudeKey);
+  }
+  // Last resort: try any available key regardless of provider setting
+  if (keys.apiKeyGemini) return parseWithGemini(file, keys.apiKeyGemini);
+  if (keys.apiKeyOpenAI) return parseWithOpenAI(file, keys.apiKeyOpenAI);
+
+  // Fallback: basic pure-JS extraction (works on simple text PDFs)
+  return parseWithFallback(file);
 };
 
-// ─── PDF Text Extraction ──────────────────────────────────────────────────
+// ─── Claude API Parser ────────────────────────────────────────────────────
 
-async function extractTextFromPDF(file) {
-  // Load PDF.js from CDN
-  if (!window.pdfjsLib) {
-    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  }
+async function parseWithClaude(file, apiKey) {
+  const base64 = await fileToBase64(file);
 
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const prompt = `Extract all resume information from this PDF and return it as a single JSON object with EXACTLY this structure. Be thorough — extract everything you can see.
 
-  let fullText = '';
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    const pageText = content.items.map(item => item.str).join(' ');
-    fullText += pageText + '\n';
-  }
-
-  return fullText.trim();
+{
+  "firstName": "first name only",
+  "lastName": "last name only",
+  "email": "email address",
+  "phone": "phone number",
+  "city": "city",
+  "state": "state/province abbreviation",
+  "country": "country",
+  "address": "street address if present",
+  "zip": "zip/postal code if present",
+  "linkedin": "full linkedin URL or profile path",
+  "github": "full github URL if present",
+  "portfolio": "portfolio or personal website URL if present",
+  "title": "current or most recent job title",
+  "yearsExperience": "estimated total years of work experience as a number",
+  "summary": "professional summary or objective statement, verbatim",
+  "skills": ["skill1", "skill2", "...array of all skills mentioned"],
+  "workHistory": [
+    {
+      "title": "job title",
+      "company": "company name",
+      "startDate": "start date (e.g. April 2024)",
+      "endDate": "end date or Present",
+      "description": "full description of responsibilities and achievements"
+    }
+  ],
+  "education": [
+    {
+      "school": "school name",
+      "degree": "degree type (e.g. BA, BS, MS)",
+      "field": "field of study",
+      "year": "graduation year or expected year",
+      "gpa": "GPA if listed"
+    }
+  ],
+  "projects": [
+    {
+      "name": "project name",
+      "url": "project URL or GitHub link if present",
+      "technologies": "comma-separated list of technologies/tools used",
+      "description": "what the project does and key achievements"
+    }
+  ]
 }
 
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = src;
-    script.onload = resolve;
-    script.onerror = reject;
-    document.head.appendChild(script);
+IMPORTANT: Do NOT put personal projects or side projects in workHistory. Only include actual paid employment in workHistory. Projects, side projects, freelance builds, and personal/portfolio work go in the projects array.
+
+Return ONLY the JSON object. No markdown, no explanation, just the JSON.`;
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-beta': 'pdfs-2024-09-25'
+    },
+    body: JSON.stringify({
+      model: 'claude-opus-4-6',
+      max_tokens: 4096,
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'document',
+          source: {
+            type: 'base64',
+            media_type: 'application/pdf',
+            data: base64
+          }
+        }, {
+          type: 'text',
+          text: prompt
+        }]
+      }]
+    })
   });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error?.message || `API error ${response.status}. Check your Claude API key in AI Settings.`);
+  }
+
+  const data = await response.json();
+  const text = data.content?.[0]?.text || '';
+
+  // Extract JSON from response
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Could not parse Claude response. Try again.');
+
+  const parsed = JSON.parse(jsonMatch[0]);
+
+  // Normalize yearsExperience to a number
+  if (parsed.yearsExperience && typeof parsed.yearsExperience === 'string') {
+    const num = parseInt(parsed.yearsExperience);
+    parsed.yearsExperience = isNaN(num) ? '' : String(num);
+  }
+
+  return parsed;
 }
 
-// ─── Text Parser ──────────────────────────────────────────────────────────
+// ─── Gemini API Parser ────────────────────────────────────────────────────
+
+async function parseWithGemini(file, apiKey) {
+  const base64 = await fileToBase64(file);
+
+  const prompt = `Extract all resume information from this PDF and return it as a single JSON object with EXACTLY this structure. Be thorough — extract everything you can see.
+
+{
+  "firstName": "first name only",
+  "lastName": "last name only",
+  "email": "email address",
+  "phone": "phone number",
+  "city": "city",
+  "state": "state/province abbreviation",
+  "country": "country",
+  "address": "street address if present",
+  "zip": "zip/postal code if present",
+  "linkedin": "full linkedin URL or profile path",
+  "github": "full github URL if present",
+  "portfolio": "portfolio or personal website URL if present",
+  "title": "current or most recent job title",
+  "yearsExperience": "estimated total years of work experience as a number",
+  "summary": "professional summary or objective statement, verbatim",
+  "skills": ["skill1", "skill2", "...array of all skills mentioned"],
+  "workHistory": [
+    {
+      "title": "job title",
+      "company": "company name",
+      "startDate": "start date (e.g. April 2024)",
+      "endDate": "end date or Present",
+      "description": "full description of responsibilities and achievements"
+    }
+  ],
+  "education": [
+    {
+      "school": "school name",
+      "degree": "degree type (e.g. BA, BS, MS)",
+      "field": "field of study",
+      "year": "graduation year or expected year",
+      "gpa": "GPA if listed"
+    }
+  ],
+  "projects": [
+    {
+      "name": "project name",
+      "url": "project URL or GitHub link if present",
+      "technologies": "comma-separated list of technologies/tools used",
+      "description": "what the project does and key achievements"
+    }
+  ]
+}
+
+IMPORTANT: Do NOT put personal projects or side projects in workHistory. Only include actual paid employment in workHistory. Projects, side projects, freelance builds, and personal/portfolio work go in the projects array.
+
+Return ONLY the JSON object. No markdown, no explanation, just the JSON.`;
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            {
+              inline_data: {
+                mime_type: 'application/pdf',
+                data: base64
+              }
+            },
+            { text: prompt }
+          ]
+        }],
+        generationConfig: { temperature: 0 }
+      })
+    }
+  );
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error?.message || `Gemini API error ${response.status}. Check your Gemini API key in AI Settings.`);
+  }
+
+  const data = await response.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Could not parse Gemini response. Try again.');
+
+  const parsed = JSON.parse(jsonMatch[0]);
+
+  if (parsed.yearsExperience && typeof parsed.yearsExperience === 'string') {
+    const num = parseInt(parsed.yearsExperience);
+    parsed.yearsExperience = isNaN(num) ? '' : String(num);
+  }
+
+  return parsed;
+}
+
+// ─── OpenAI API Parser ────────────────────────────────────────────────────
+
+async function parseWithOpenAI(file, apiKey) {
+  const base64 = await fileToBase64(file);
+
+  const prompt = `Extract all resume information from this PDF and return it as a single JSON object with EXACTLY this structure. Be thorough — extract everything you can see.
+
+{
+  "firstName": "first name only",
+  "lastName": "last name only",
+  "email": "email address",
+  "phone": "phone number",
+  "city": "city",
+  "state": "state/province abbreviation",
+  "country": "country",
+  "address": "street address if present",
+  "zip": "zip/postal code if present",
+  "linkedin": "full linkedin URL or profile path",
+  "github": "full github URL if present",
+  "portfolio": "portfolio or personal website URL if present",
+  "title": "current or most recent job title",
+  "yearsExperience": "estimated total years of work experience as a number",
+  "summary": "professional summary or objective statement, verbatim",
+  "skills": ["skill1", "skill2", "...array of all skills mentioned"],
+  "workHistory": [
+    {
+      "title": "job title",
+      "company": "company name",
+      "startDate": "start date (e.g. April 2024)",
+      "endDate": "end date or Present",
+      "description": "full description of responsibilities and achievements"
+    }
+  ],
+  "education": [
+    {
+      "school": "school name",
+      "degree": "degree type (e.g. BA, BS, MS)",
+      "field": "field of study",
+      "year": "graduation year or expected year",
+      "gpa": "GPA if listed"
+    }
+  ],
+  "projects": [
+    {
+      "name": "project name",
+      "url": "project URL or GitHub link if present",
+      "technologies": "comma-separated list of technologies/tools used",
+      "description": "what the project does and key achievements"
+    }
+  ]
+}
+
+IMPORTANT: Do NOT put personal projects or side projects in workHistory. Only include actual paid employment in workHistory. Projects, side projects, freelance builds, and personal/portfolio work go in the projects array.
+
+Return ONLY the JSON object. No markdown, no explanation, just the JSON.`;
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o',
+      max_tokens: 4096,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'image_url',
+            image_url: { url: `data:application/pdf;base64,${base64}` }
+          },
+          { type: 'text', text: prompt }
+        ]
+      }]
+    })
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error?.message || `OpenAI API error ${response.status}. Check your OpenAI API key in AI Settings.`);
+  }
+
+  const data = await response.json();
+  const text = data.choices?.[0]?.message?.content || '';
+
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Could not parse OpenAI response. Try again.');
+
+  const parsed = JSON.parse(jsonMatch[0]);
+
+  if (parsed.yearsExperience && typeof parsed.yearsExperience === 'string') {
+    const num = parseInt(parsed.yearsExperience);
+    parsed.yearsExperience = isNaN(num) ? '' : String(num);
+  }
+
+  return parsed;
+}
+
+// ─── Fallback Pure-JS Parser ──────────────────────────────────────────────
+// Works on basic text PDFs. For CIDFont/Google Docs PDFs, API is required.
+
+async function parseWithFallback(file) {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  const raw = String.fromCharCode(...bytes);
+
+  // Try to get any readable text from the PDF
+  const text = extractReadableText(raw);
+
+  if (!text || text.length < 30) {
+    throw new Error(
+      'Could not read this PDF format without an API key. ' +
+      'Add your Claude API key in AI Settings to enable full resume parsing — it works on any PDF.'
+    );
+  }
+
+  return parseResumeText(text);
+}
+
+function extractReadableText(raw) {
+  let text = '';
+
+  // Try parenthesis-encoded strings (Tj/TJ operators)
+  const parenStrings = raw.match(/\(([^)\\]{2,})\)/g) || [];
+  for (const s of parenStrings) {
+    const inner = s.slice(1, -1)
+      .replace(/\\n/g, ' ').replace(/\\r/g, '').replace(/\\t/g, ' ')
+      .replace(/\\\(/g, '(').replace(/\\\)/g, ')');
+    if (/[a-zA-Z]{2,}/.test(inner)) text += inner + ' ';
+  }
+
+  // Clean
+  text = text.replace(/[^\x20-\x7E\n]/g, ' ').replace(/ {2,}/g, ' ').trim();
+  return text;
+}
+
+// ─── Basic text parsing (fallback only) ──────────────────────────────────
 
 function parseResumeText(text) {
   const result = {
-    firstName: '',
-    lastName: '',
-    email: '',
-    phone: '',
-    linkedin: '',
-    github: '',
-    portfolio: '',
-    summary: '',
-    skills: [],
-    workHistory: [],
-    education: []
+    firstName: '', lastName: '', email: '', phone: '',
+    city: '', state: '', country: '', linkedin: '', github: '',
+    portfolio: '', summary: '', skills: [], workHistory: [], education: []
   };
 
-  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
-
-  // ── Contact Info ──────────────────────────────────────────────────────
-
-  // Email
-  const emailMatch = text.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/);
+  const emailMatch = text.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/);
   if (emailMatch) result.email = emailMatch[0];
 
-  // Phone
-  const phoneMatch = text.match(/(\+?1?\s?)?(\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4})/);
+  const phoneMatch = text.match(/(\+?1[\s.-]?)?\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}/);
   if (phoneMatch) result.phone = phoneMatch[0].trim();
 
-  // LinkedIn
-  const linkedinMatch = text.match(/linkedin\.com\/in\/[\w-]+/i);
+  const linkedinMatch = text.match(/linkedin\.com\/in\/[\w%-]+/i);
   if (linkedinMatch) result.linkedin = 'https://' + linkedinMatch[0];
 
-  // GitHub
   const githubMatch = text.match(/github\.com\/[\w-]+/i);
   if (githubMatch) result.github = 'https://' + githubMatch[0];
 
-  // Portfolio / Personal site
-  const portfolioMatch = text.match(/https?:\/\/(?!linkedin|github)[\w.-]+\.[a-z]{2,}[^\s]*/i);
-  if (portfolioMatch) result.portfolio = portfolioMatch[0];
-
-  // ── Name ─────────────────────────────────────────────────────────────
-  // Heuristic: first non-empty line that is NOT an email/phone/URL is likely the name
-  for (const line of lines.slice(0, 6)) {
-    if (
-      !line.includes('@') &&
-      !line.match(/^\+?[\d\s().–-]{7,}$/) &&
-      !line.match(/^https?:\/\//i) &&
-      !line.match(/^linkedin|github/i) &&
-      line.split(' ').length >= 2 &&
-      line.split(' ').length <= 5 &&
-      line.length < 60 &&
-      /^[A-Za-z]/.test(line)
-    ) {
-      const parts = line.trim().split(/\s+/);
-      result.firstName = parts[0];
-      result.lastName = parts.slice(1).join(' ');
-      break;
-    }
-  }
-
-  // ── Sections ──────────────────────────────────────────────────────────
-  const sectionHeaders = {
-    summary: /^(summary|professional summary|profile|objective|about me|introduction)/i,
-    skills: /^(skills|technical skills|core competencies|technologies|competencies|tools)/i,
-    work: /^(experience|work experience|employment|professional experience|work history|career)/i,
-    education: /^(education|academic|qualifications|degrees)/i
-  };
-
-  let currentSection = null;
-  const sections = { summary: [], skills: [], work: [], education: [] };
-
-  for (const line of lines) {
-    const isHeader = Object.entries(sectionHeaders).find(([, regex]) => regex.test(line));
-    if (isHeader) {
-      currentSection = isHeader[0];
-      continue;
-    }
-    if (currentSection) {
-      sections[currentSection].push(line);
-    }
-  }
-
-  // ── Summary ───────────────────────────────────────────────────────────
-  if (sections.summary.length) {
-    result.summary = sections.summary.slice(0, 5).join(' ').substring(0, 600);
-  }
-
-  // ── Skills ────────────────────────────────────────────────────────────
-  if (sections.skills.length) {
-    const skillText = sections.skills.join(' ');
-    result.skills = skillText
-      .split(/[,•|·\/\n]/)
-      .map(s => s.trim())
-      .filter(s => s.length > 1 && s.length < 40 && /[a-zA-Z]/.test(s))
-      .slice(0, 40);
-  }
-
-  // ── Work History ──────────────────────────────────────────────────────
-  if (sections.work.length) {
-    result.workHistory = parseWorkSection(sections.work);
-  }
-
-  // ── Education ─────────────────────────────────────────────────────────
-  if (sections.education.length) {
-    result.education = parseEducationSection(sections.education);
+  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
+  for (const line of lines.slice(0, 8)) {
+    if (line.includes('@') || /^\+?[\d\s().–-]{7,}$/.test(line)) continue;
+    if (/^https?:\/\//i.test(line) || line.split(' ').length < 2 || line.length > 70) continue;
+    const parts = line.trim().split(/\s+/);
+    result.firstName = parts[0];
+    result.lastName = parts.slice(1).join(' ');
+    break;
   }
 
   return result;
 }
 
-// ─── Work Section Parser ──────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────
 
-function parseWorkSection(lines) {
-  const jobs = [];
-  let currentJob = null;
-  const descLines = [];
-
-  const datePattern = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december)[\s.]*\d{4}\b|\b\d{4}\s*[-–]\s*(\d{4}|present|current)\b/i;
-
-  for (const line of lines) {
-    const hasDate = datePattern.test(line);
-
-    if (hasDate && line.length < 120) {
-      // Save previous job
-      if (currentJob) {
-        currentJob.description = descLines.splice(0).join(' ').substring(0, 400);
-        jobs.push(currentJob);
-        descLines.length = 0;
-      }
-
-      const dateMatch = line.match(/(\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s*\d{4}|\d{4})\s*[-–to]+\s*(\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s*\d{4}|\d{4}|present|current)/i);
-      const startDate = dateMatch?.[1] || '';
-      const endDate = dateMatch?.[2] || 'Present';
-
-      // Title / company heuristic: text before the date
-      const beforeDate = line.replace(datePattern, '').trim();
-      const parts = beforeDate.split(/[,|·•\-–]+/).map(s => s.trim()).filter(Boolean);
-
-      currentJob = {
-        title: parts[0] || '',
-        company: parts[1] || '',
-        startDate,
-        endDate,
-        description: ''
-      };
-    } else if (currentJob && line.length > 10) {
-      descLines.push(line);
-    }
-  }
-
-  if (currentJob) {
-    currentJob.description = descLines.join(' ').substring(0, 400);
-    jobs.push(currentJob);
-  }
-
-  return jobs.slice(0, 8);
-}
-
-// ─── Education Section Parser ─────────────────────────────────────────────
-
-function parseEducationSection(lines) {
-  const schools = [];
-  let currentSchool = null;
-
-  const degreeKeywords = /\b(b\.?s\.?|b\.?a\.?|m\.?s\.?|m\.?a\.?|ph\.?d\.?|bachelor|master|associate|doctor|mba|llb|llm|be|btech|mtech)\b/i;
-  const yearPattern = /\b(19|20)\d{2}\b/;
-
-  for (const line of lines) {
-    const hasDegree = degreeKeywords.test(line);
-    const hasYear = yearPattern.test(line);
-
-    if (hasDegree || (hasYear && line.length < 100)) {
-      if (currentSchool) schools.push(currentSchool);
-      const yearMatch = line.match(yearPattern);
-      const degreeMatch = line.match(degreeKeywords);
-
-      // Heuristic: school name is usually first part before comma or degree
-      const parts = line.split(/[,|·•]+/).map(s => s.trim()).filter(Boolean);
-
-      currentSchool = {
-        school: parts.find(p => !degreeKeywords.test(p) && !yearPattern.test(p)) || parts[0] || '',
-        degree: degreeMatch?.[0] || '',
-        field: '',
-        year: yearMatch?.[0] || '',
-        gpa: ''
-      };
-
-      // Try to extract field of study
-      const inMatch = line.match(/(?:in|of)\s+([\w\s&]+?)(?:,|\.|$)/i);
-      if (inMatch) currentSchool.field = inMatch[1].trim();
-
-      // GPA
-      const gpaMatch = line.match(/gpa[:\s]+([0-9.]+)/i);
-      if (gpaMatch) currentSchool.gpa = gpaMatch[1];
-    }
-  }
-
-  if (currentSchool) schools.push(currentSchool);
-  return schools.slice(0, 5);
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result;
+      // Strip "data:application/pdf;base64," prefix
+      const base64 = dataUrl.split(',')[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }

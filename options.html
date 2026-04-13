@@ -41,6 +41,7 @@
       font-weight: 700;
       background: linear-gradient(135deg, #667eea, #a78bfa);
       -webkit-background-clip: text;
+      background-clip: text;
       -webkit-text-fill-color: transparent;
     }
 
@@ -385,6 +386,9 @@
       <div class="nav-item" data-section="skills">
         <span class="icon">⚡</span> Skills
       </div>
+      <div class="nav-item" data-section="projects">
+        <span class="icon">🚀</span> Projects
+      </div>
       <div class="nav-item" data-section="resume">
         <span class="icon">📄</span> Import Resume
       </div>
@@ -551,6 +555,20 @@
         </div>
       </div>
 
+      <!-- ── Projects ──────────────────────────────────────── -->
+      <div class="section" id="section-projects">
+        <div class="section-header">
+          <h2>Projects</h2>
+          <p>Personal, freelance, or side projects. These will be used by AI to highlight your work — separate from paid employment.</p>
+        </div>
+        <div class="dynamic-list" id="projects-list"></div>
+        <button class="add-btn" id="add-project">+ Add Project</button>
+        <div class="action-bar">
+          <button class="btn btn-primary" id="save-projects">Save Projects</button>
+          <span id="save-projects-status" style="font-size:13px; color:#4ade80; display:none;">✓ Saved</span>
+        </div>
+      </div>
+
       <!-- ── Education ──────────────────────────────────────── -->
       <div class="section" id="section-education">
         <div class="section-header">
@@ -607,19 +625,53 @@
       <div class="section" id="section-ai">
         <div class="section-header">
           <h2>AI Settings</h2>
-          <p>Configure Claude AI to generate personalized cover letters and answers.</p>
+          <p>Configure your preferred AI model to generate personalized cover letters and answers.</p>
         </div>
         <div class="card">
-          <h3>Claude API Key</h3>
+          <h3>AI Provider & API Key</h3>
           <p style="font-size:13px; color:#888; margin-bottom: 14px;">
-            Get your free API key at <a href="https://console.anthropic.com" target="_blank" style="color:#667eea;">console.anthropic.com</a>. Your key is stored locally and never shared.
+            Choose your preferred AI model. Your key is stored locally and never shared.
           </p>
-          <div class="api-key-input">
-            <input type="password" id="apiKey" placeholder="sk-ant-api03-..." autocomplete="off" />
-            <button class="btn btn-secondary" id="toggle-key">Show</button>
-            <button class="btn btn-primary" id="save-key">Save Key</button>
+          <div class="field" style="margin-bottom: 16px;">
+            <label>Provider</label>
+            <select id="aiProvider">
+              <option value="claude">Claude (Anthropic)</option>
+              <option value="openai">OpenAI (GPT-4o)</option>
+              <option value="gemini">Gemini (Google)</option>
+            </select>
           </div>
-          <div id="key-status" style="margin-top: 10px; font-size: 13px;"></div>
+          
+          <div id="claude-config" class="provider-config">
+            <label>Claude API Key</label>
+            <div class="api-key-input">
+              <input type="password" id="apiKeyClaude" placeholder="sk-ant-api03-..." autocomplete="off" />
+              <button class="btn btn-secondary toggle-key" data-target="apiKeyClaude">Show</button>
+            </div>
+            <p style="font-size:11px; color:#666; margin-top: 6px;">Get one at <a href="https://console.anthropic.com" target="_blank" style="color:#667eea;">console.anthropic.com</a></p>
+          </div>
+
+          <div id="openai-config" class="provider-config" style="display:none;">
+            <label>OpenAI API Key</label>
+            <div class="api-key-input">
+              <input type="password" id="apiKeyOpenAI" placeholder="sk-..." autocomplete="off" />
+              <button class="btn btn-secondary toggle-key" data-target="apiKeyOpenAI">Show</button>
+            </div>
+            <p style="font-size:11px; color:#666; margin-top: 6px;">Get one at <a href="https://platform.openai.com" target="_blank" style="color:#667eea;">platform.openai.com</a></p>
+          </div>
+
+          <div id="gemini-config" class="provider-config" style="display:none;">
+            <label>Gemini API Key</label>
+            <div class="api-key-input">
+              <input type="password" id="apiKeyGemini" placeholder="AIzaSy..." autocomplete="off" />
+              <button class="btn btn-secondary toggle-key" data-target="apiKeyGemini">Show</button>
+            </div>
+            <p style="font-size:11px; color:#666; margin-top: 6px;">Get one at <a href="https://aistudio.google.com" target="_blank" style="color:#667eea;">aistudio.google.com</a></p>
+          </div>
+
+          <div class="action-bar" style="padding-top: 16px;">
+            <button class="btn btn-primary" id="save-key">Save Settings</button>
+            <div id="key-status" style="margin-left: 10px; font-size: 13px;"></div>
+          </div>
         </div>
         <div class="card">
           <h3>AI Preferences</h3>
