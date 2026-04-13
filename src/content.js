@@ -536,27 +536,27 @@
           const safeCompany = escapeFloatingHTML(job.company);
           const safeReason = escapeFloatingHTML(job.reason);
 
-          return \`
+          return `
             <div style="background: white; border-radius: 8px; padding: 12px; margin-bottom: 12px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
               <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
                 <div style="flex: 1; min-width: 0;">
-                  <div style="font-weight: 600; font-size: 14px; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="\${safeTitle}">
-                    \${safeTitle}
+                  <div style="font-weight: 600; font-size: 14px; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${safeTitle}">
+                    ${safeTitle}
                   </div>
-                  <div style="font-size: 12px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="\${safeCompany}">
-                    \${safeCompany}
+                  <div style="font-size: 12px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${safeCompany}">
+                    ${safeCompany}
                   </div>
                 </div>
-                <div style="margin-left: 12px; background: \${scoreBg}; color: \${scoreColor}; font-weight: bold; font-size: 14px; padding: 4px 8px; border-radius: 6px;">
-                  \${job.score}
+                <div style="margin-left: 12px; background: ${scoreBg}; color: ${scoreColor}; font-weight: bold; font-size: 14px; padding: 4px 8px; border-radius: 6px;">
+                  ${job.score}
                 </div>
               </div>
               <div style="font-size: 13px; color: #475569; line-height: 1.4;">
-                \${safeReason}
+                ${safeReason}
               </div>
-              \${job.link ? \`<div style="margin-top: 8px; text-align: right;"><a href="\${job.link}" target="_blank" style="font-size: 13px; color: #2563eb; text-decoration: none; font-weight: 500; padding: 4px 8px; border-radius: 4px; border: 1px solid #bfdbfe; background: #eff6ff;">View Job ↗</a></div>\` : ''}
+              ${job.link ? `<div style="margin-top: 8px; text-align: right;"><a href="${job.link}" target="_blank" style="font-size: 13px; color: #2563eb; text-decoration: none; font-weight: 500; padding: 4px 8px; border-radius: 4px; border: 1px solid #bfdbfe; background: #eff6ff;">View Job ↗</a></div>` : ''}
             </div>
-          \`;
+          `;
         }).join('')}
       </div>
     `;
