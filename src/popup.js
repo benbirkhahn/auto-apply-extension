@@ -279,17 +279,17 @@ function renderJobScanResults(jobs, evaluatedJobs) {
   
   // Merge evaluations with original jobs
   const mergedJobs = jobs.map((job, idx) => {
-    const evalData = evaluatedJobs.find(e => e.jobIndex === idx) || { fitScore: 0, reason: 'Evaluation failed.' };
+    const evalData = evaluatedJobs.find(e => e.jobIndex === idx) || { score: 0, reason: 'Evaluation failed.' };
     return { ...job, ...evalData };
   });
 
   // Sort descending by score
-  mergedJobs.sort((a, b) => b.fitScore - a.fitScore);
+  mergedJobs.sort((a, b) => b.score - a.score);
 
   listContainer.innerHTML = mergedJobs.map(job => {
     let scoreClass = 'score-low';
-    if (job.fitScore >= 75) scoreClass = 'score-high';
-    else if (job.fitScore >= 50) scoreClass = 'score-med';
+    if (job.score >= 75) scoreClass = 'score-high';
+    else if (job.score >= 50) scoreClass = 'score-med';
 
     return `
       <div class="job-card">
@@ -298,7 +298,7 @@ function renderJobScanResults(jobs, evaluatedJobs) {
             <div class="job-card-title">${escapeHTML(job.title)}</div>
             <div class="job-card-company">${escapeHTML(job.company)}</div>
           </div>
-          <div class="job-card-score ${scoreClass}">${job.fitScore}/100</div>
+          <div class="job-card-score ${scoreClass}">${job.score}/100</div>
         </div>
         <div class="job-card-reason">${escapeHTML(job.reason)}</div>
         ${job.link ? `<a href="${job.link}" target="_blank" class="job-card-link">View Job ↗</a>` : ''}

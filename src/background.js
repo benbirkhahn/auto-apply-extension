@@ -143,7 +143,7 @@ async function generateOpenAI(apiKey, prompt) {
 
   const data = await response.json();
   const text = data.choices?.[0]?.message?.content || '';
-  return JSON.parse(text);
+  return parseAIJSON(text);
 }
 
 async function generateGemini(apiKey, prompt) {
@@ -163,7 +163,7 @@ async function generateGemini(apiKey, prompt) {
 
   const data = await response.json();
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  return JSON.parse(text);
+  return parseAIJSON(text);
 }
 
 function parseAIJSON(text) {
