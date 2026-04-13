@@ -65,7 +65,7 @@ async function detectSite(tab) {
   }
 
   // Check if it's a job search page (Linkedin or Indeed) to show Scan button
-  const isJobSearch = tab.url && (/linkedin\.com\/jobs\/search/i.test(tab.url) || /indeed\.com\/jobs/i.test(tab.url));
+  const isJobSearch = tab.url && (/linkedin\.com\/jobs/i.test(tab.url) || /indeed\.com/i.test(tab.url));
   const scanBtn = document.getElementById('scan-jobs-btn');
   if (isJobSearch) {
     scanBtn.style.display = 'block';
