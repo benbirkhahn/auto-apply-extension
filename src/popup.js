@@ -286,6 +286,12 @@ function renderJobScanResults(jobs, evaluatedJobs) {
   // Sort descending by score
   mergedJobs.sort((a, b) => b.score - a.score);
 
+  // Send to content script to display floating sidebar
+  chrome.tabs.sendMessage(currentTab.id, { type: 'SHOW_IN_PAGE_RESULTS', jobs: mergedJobs });
+  
+  // Cache in local storage so it persists across popup opens
+  chrome.storage.local.set({ lastScanResults: mergedJobs });
+
   listContainer.innerHTML = mergedJobs.map(job => {
     let scoreClass = 'score-low';
     if (job.score >= 75) scoreClass = 'score-high';

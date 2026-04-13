@@ -161,6 +161,12 @@
       sendResponse({ success: true, jobs });
       return true;
     }
+
+    if (message.type === 'SHOW_IN_PAGE_RESULTS') {
+      injectFloatingSidebar(message.jobs);
+      sendResponse({ success: true });
+      return true;
+    }
   });
 
   // ─── Form Detection ───────────────────────────────────────────────────────
@@ -473,6 +479,110 @@
 
   function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // ─── Floating UI ────────────────────────────────────────────────────────
+  function injectFloatingSidebar(jobs) {
+    let sidebar = document.getElementById('auto-apply-floating-sidebar');
+    if (!sidebar) {
+      sidebar = document.createElement('div');
+      sidebar.id = 'auto-apply-floating-sidebar';
+      
+      Object.assign(sidebar.style, {
+        position: 'fixed',
+        top: '20px',
+        right: '20px',
+        width: '350px',
+        maxHeight: 'calc(100vh - 40px)',
+        backgroundColor: '#ffffff',
+        borderRadius: '12px',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+        zIndex: '2147483647',
+        display: 'flex',
+        flexDirection: 'column',
+        fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+        overflow: 'hidden',
+        border: '1px solid #e2e8f0',
+        transition: 'transform 0.3s ease'
+      });
+
+      document.body.appendChild(sidebar);
+    }
+
+    const headerHtml = `
+      <div style="padding: 16px; background-color: #2563eb; color: white; display: flex; justify-content: space-between; align-items: center; border-radius: 12px 12px 0 0;">
+        <h3 style="margin: 0; font-size: 16px; font-weight: 600;">AI Job Fit Scanner</h3>
+        <div>
+          <button id="aa-minimize-btn" style="background: none; border: none; color: white; cursor: pointer; font-size: 18px; padding: 0 8px;">_</button>
+          <button id="aa-close-btn" style="background: none; border: none; color: white; cursor: pointer; font-size: 20px; padding: 0 8px; line-height: 1;">×</button>
+        </div>
+      </div>
+    `;
+
+    const contentHtml = `
+      <div id="aa-sidebar-content" style="padding: 16px; overflow-y: auto; flex: 1; background-color: #f8fafc;">
+        ${jobs.map(job => {
+          let scoreColor = '#ef4444';
+          let scoreBg = '#fee2e2';
+          if (job.score >= 75) {
+            scoreColor = '#10b981';
+            scoreBg = '#d1fae5';
+          } else if (job.score >= 50) {
+            scoreColor = '#f59e0b';
+            scoreBg = '#fef3c7';
+          }
+
+          const safeTitle = escapeFloatingHTML(job.title);
+          const safeCompany = escapeFloatingHTML(job.company);
+          const safeReason = escapeFloatingHTML(job.reason);
+
+          return \`
+            <div style="background: white; border-radius: 8px; padding: 12px; margin-bottom: 12px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                <div style="flex: 1; min-width: 0;">
+                  <div style="font-weight: 600; font-size: 14px; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="\${safeTitle}">
+                    \${safeTitle}
+                  </div>
+                  <div style="font-size: 12px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="\${safeCompany}">
+                    \${safeCompany}
+                  </div>
+                </div>
+                <div style="margin-left: 12px; background: \${scoreBg}; color: \${scoreColor}; font-weight: bold; font-size: 14px; padding: 4px 8px; border-radius: 6px;">
+                  \${job.score}
+                </div>
+              </div>
+              <div style="font-size: 13px; color: #475569; line-height: 1.4;">
+                \${safeReason}
+              </div>
+              \${job.link ? \`<div style="margin-top: 8px; text-align: right;"><a href="\${job.link}" target="_blank" style="font-size: 13px; color: #2563eb; text-decoration: none; font-weight: 500; padding: 4px 8px; border-radius: 4px; border: 1px solid #bfdbfe; background: #eff6ff;">View Job ↗</a></div>\` : ''}
+            </div>
+          \`;
+        }).join('')}
+      </div>
+    `;
+
+    sidebar.innerHTML = headerHtml + contentHtml;
+
+    let minimized = false;
+    document.getElementById('aa-minimize-btn').addEventListener('click', () => {
+      const content = document.getElementById('aa-sidebar-content');
+      if (minimized) {
+        content.style.display = 'block';
+        sidebar.style.width = '350px';
+      } else {
+        content.style.display = 'none';
+        sidebar.style.width = '200px';
+      }
+      minimized = !minimized;
+    });
+
+    document.getElementById('aa-close-btn').addEventListener('click', () => {
+      sidebar.remove();
+    });
+  }
+
+  function escapeFloatingHTML(str) {
+    return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
 })();
