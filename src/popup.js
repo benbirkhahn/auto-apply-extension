@@ -257,7 +257,8 @@ async function handleScanJobs() {
     });
 
     if (aiResponse && aiResponse.success) {
-      renderJobScanResults(jobs, aiResponse.data);
+      const evalArray = Array.isArray(aiResponse.data) ? aiResponse.data : (aiResponse.data.evaluatedJobs || []);
+      renderJobScanResults(jobs, evalArray);
       showToast('Evaluation complete!', 'success');
     } else {
       throw new Error(aiResponse.error || 'Failed to evaluate jobs.');
